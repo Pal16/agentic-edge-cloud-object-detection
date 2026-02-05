@@ -1,0 +1,21 @@
+from pycocotools.cocoeval import COCOeval
+
+
+def evaluate_coco(coco_gt, detections, image_ids):
+    coco_dt = coco_gt.loadRes(detections)
+
+    coco_eval = COCOeval(coco_gt, coco_dt, iouType="bbox")
+    coco_eval.params.imgIds = image_ids
+
+    coco_eval.evaluate()
+    coco_eval.accumulate()
+    coco_eval.summarize()
+
+    return {
+        "AP": coco_eval.stats[0],
+        "AP50": coco_eval.stats[1],
+        "AP75": coco_eval.stats[2],
+        "AP_small": coco_eval.stats[3],
+        "AP_medium": coco_eval.stats[4],
+        "AP_large": coco_eval.stats[5],
+    }
