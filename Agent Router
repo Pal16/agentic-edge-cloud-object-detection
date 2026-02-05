@@ -1,0 +1,18 @@
+class AgentRouter:
+    def __init__(
+        self,
+        confidence_threshold: float = 0.5,
+        latency_budget: float = 0.1
+    ):
+        self.confidence_threshold = confidence_threshold
+        self.latency_budget = latency_budget
+
+    def route(self, detections, edge_latency):
+            if not detections:
+            return "cloud"
+
+        avg_conf = sum(d["score"] for d in detections) / len(detections)
+
+        if avg_conf >= self.confidence_threshold and edge_latency <= self.latency_budget:
+            return "edge"
+        return "cloud"
