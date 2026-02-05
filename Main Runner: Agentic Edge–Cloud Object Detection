@@ -1,0 +1,111 @@
+import argparse
+from pathlib import Path
+
+from pycocotools.coco import COCO
+
+from edge.yolo_edge import YOLOEdgeDetector
+from cloud.rtdetr_cloud import RTDETRCloudDetector
+from controller.agent_router import AgentRouter
+from evaluation.coco_metrics import evaluate_coco
+from utils.profiling import compute_fps, latency_stats
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Agentic Edge–Cloud Object Detection")
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        required=True,
+        help="Path to COCO dataset root (e.g., coco128)"
+    )
+    parser.add_argument(
+        "--num_images",
+        type=int,
+        default=10,
+        help="Number of images to process"
+    )
+    parser.add_argument(
+        "--confidence_threshold",
+        type=float,
+        default=0.5,
+        help="Confidence threshold for edge acceptance"
+    )
+    parser.add_argument(
+        "--latency_budget",
+        type=float,
+        default=0.1,
+        help="Latency budget (seconds) for edge inference"
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    data_dir = Path(args.data_dir)
+    img_dir = data_dir / "images/train2017"
+    ann_file = data_dir / "annotations/instances_train2017.json"
+
+    # Load COCO ground truth
+    coco_gt = COCO(str(ann_file))
+    image_ids = coco_gt.getImgIds()[:args.num_images]
+
+    # Initialize components
+    edge_detector = YOLOEdgeDetector()
+    cloud_detector = RTDETRCloudDetector()
+    router = AgentRouter(
+        confidence_threshold=args.confidence_threshold,
+        latency_budget=args.latency_budget
+    )
+
+    all_detections = []
+    latencies = []
+
+    print("\n🚀 Starting Agentic Edge–Cloud Detection\n")
+
+    for img_id in image_ids:
+        img_info = coco_gt.loadImgs(img_id)[0]
+        img_path = img_dir / img_info["file_name"]
+
+        # Edge inference
+        edge_dets, edge_latency = edge_detector.infer(str(img_path))
+        decision = router.route(edge_dets, edge_latency)
+
+        if decision == "edge":
+            detections = edge_dets
+            latency = edge_latency
+        else:
+            detections, cloud_latency = cloud_detector.infer(str(img_path))
+            latency = edge_latency + cloud_latency
+
+        latencies.append(latency)
+
+        for det in detections:
+            det["image_id"] = img_id
+            all_detections.append(det)
+
+        print(
+            f"Image {img_id} | "
+            f"Decision={decision.upper()} | "
+            f"Latency={latency:.3f}s | "
+            f"Detections={len(detections)}"
+        )
+
+    # Evaluation
+    print("\n📊 Running COCO Evaluation\n")
+    metrics = evaluate_coco(coco_gt, all_detections, image_ids)
+
+    # Profiling
+    fps = compute_fps(latencies)
+    latency_info = latency_stats(latencies)
+
+    print("\n✅ FINAL RESULTS")
+    print(f"FPS: {fps:.2f}")
+    print("Latency Stats:", latency_info)
+    print("COCO Metrics:")
+    for k, v in metrics.items():
+        print(f"  {k}: {v:.3f}")
+
+
+if __name__ == "__main__":
+    main()
